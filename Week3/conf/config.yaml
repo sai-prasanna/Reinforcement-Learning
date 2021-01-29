@@ -1,0 +1,31 @@
+exp:
+  env: "PongNoFrameskip-v4"
+  name: ??? 
+
+neural_net:
+  double_dqn: False
+  noisy_net: False
+  dueling: False
+
+train:
+  max_episodes: 3000
+  device: "cuda"
+  batch_size: 32
+  learning_rate: 5e-5
+  best_checkpoint: "best.pth"
+
+rl:
+  n_multi_step: 2
+  epsilon_start: 1.0
+  epsilon_decay: 1000000
+  epsilon_final: 0.02
+  gamma: 0.99
+
+replay:
+  buffer_start_size: 10001
+  buffer_capacity: 15000
+  n_iter_update_target: 1000
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d}/${exp.name}_${now:%H-%M-%S}

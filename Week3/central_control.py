@@ -21,6 +21,7 @@ class CentralControl():
 			# Normal NN
 			self.target_nn = DQN(observation_space_shape, action_space_shape, noisy_net).to(device)
 			self.moving_nn = DQN(observation_space_shape, action_space_shape, noisy_net).to(device)
+		self.moving_nn.load_state_dict(self.target_nn.state_dict())
 
 		self.device = device
 		self.gamma = gamma
@@ -80,24 +81,23 @@ class CentralControl():
 		next_states_t = torch.as_tensor(next_states, device=self.device)
 		actions_t = torch.as_tensor(actions, device=self.device)
 		rewards_t = torch.as_tensor(rewards, dtype=torch.float32, device=self.device)
-		done_t = torch.as_tensor(dones, dtype=torch.uint8, device=self.device)
+		done_t = torch.as_tensor(dones, dtype=torch.bool, device=self.device)
 
 		# Value of the action taken previously (recorded in actions_v) in the state_t
 		state_action_values = self.moving_nn(states_t).gather(1, actions_t[:,None]).squeeze(-1)
 		# NB gather is a differentiable function
 
 		# Next state value with Double DQN. (i.e. get the value predicted by the target nn, of the best action predicted by the moving nn)
-		if self.double_DQN:
-			double_max_action = self.moving_nn(next_states_t).max(1)[1]
-			double_max_action = double_max_action.detach()
-			target_output = self.target_nn(next_states_t)
-			next_state_values = torch.gather(target_output, 1, double_max_action[:,None]).squeeze(-1) # NB: [:,None] add an extra dimension
+		with torch.no_grad():
+			if self.double_DQN:
+				double_max_action = self.moving_nn(next_states_t).max(1)[1]
+				target_output = self.target_nn(next_states_t)
+				next_state_values = torch.gather(target_output, 1, double_max_action[:,None]).squeeze(-1) # NB: [:,None] add an extra dimension
 
-		# Next state value in the normal configuration
-		else:
-			next_state_values = self.target_nn(next_states_t).max(1)[0]
-
-		next_state_values = next_state_values.detach() # No backprop
+			# Next state value in the normal configuration
+			else:
+				next_state_values = self.target_nn(next_states_t).max(1)[0]
+			next_state_values[done_t] = 0
 
 		# Use the Bellman equation
 		expected_state_action_values = rewards_t + (self.gamma**self.n_multi_step) * next_state_values

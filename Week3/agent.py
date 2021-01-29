@@ -1,63 +1,58 @@
-import gym
 import numpy as np
 from collections import namedtuple
-import collections
 import torch
-import torch.nn as nn
-import torch.optim as optim
-
 import time
+import logging
 
-from neural_net import DQN
 from central_control import CentralControl
 from buffers import ReplayBuffer
 
+logger = logging.getLogger(__file__)
 
-class DQNAgent():
+class DQNAgent:
 	'''
 	Agent class. It control all the agent functionalities
 	'''
-	rewards = []
-	total_reward = 0
-	birth_time = 0
-	n_iter = 0
-	n_games = 0
-	ts_frame = 0
-	ts = time.time()
+	Memory = namedtuple('Memory', ['obs', 'action', 'new_obs', 'reward', 'done'], rename=False)
 
-	Memory = namedtuple('Memory', ['obs', 'action', 'new_obs', 'reward', 'done'], verbose=False, rename=False)
-
-	def __init__(self, env, device, hyperparameters, summary_writer=None):
+	def __init__(self, env, device, cfg, summary_writer=None):
 		'''
 		Agent initialization. It create the CentralControl that control all the low
 		'''
 
 		# The CentralControl is the 'brain' of the agent
-		self.cc = CentralControl(env.observation_space.shape, env.action_space.n, hyperparameters['gamma'], hyperparameters['n_multi_step'], hyperparameters['double_DQN'],
-				hyperparameters['noisy_net'], hyperparameters['dueling'], device)
+		self.cc = CentralControl(env.observation_space.shape, env.action_space.n, cfg.rl.gamma, cfg.rl.n_multi_step, cfg.neural_net.double_dqn,
+				cfg.neural_net.noisy_net, cfg.neural_net.dueling, device)
 
-		self.cc.set_optimizer(hyperparameters['learning_rate'])
+		self.cc.set_optimizer(cfg.train.learning_rate)
 
 		self.birth_time = time.time()
 
-		self.iter_update_target = hyperparameters['n_iter_update_target']
-		self.buffer_start_size = hyperparameters['buffer_start_size']
+		self.iter_update_target = cfg.replay.n_iter_update_target
+		self.buffer_start_size = cfg.replay.buffer_start_size
 
-		self.epsilon_start = hyperparameters['epsilon_start']
-		self.epsilon = hyperparameters['epsilon_start']
-		self.epsilon_decay = hyperparameters['epsilon_decay']
-		self.epsilon_final = hyperparameters['epsilon_final']
+		self.epsilon_start = cfg.rl.epsilon_start
+		self.epsilon = cfg.rl.epsilon_start
+		self.epsilon_decay = cfg.rl.epsilon_decay
+		self.epsilon_final = cfg.rl.epsilon_final
 
 		self.accumulated_loss = []
 		self.device = device
 
 		# initialize the replay buffer (i.e. the memory) of the agent
-		self.replay_buffer = ReplayBuffer(hyperparameters['buffer_capacity'], hyperparameters['n_multi_step'], hyperparameters['gamma'])
+		self.replay_buffer = ReplayBuffer(cfg.replay.buffer_capacity, cfg.rl.n_multi_step, cfg.rl.gamma)
 		self.summary_writer = summary_writer
 
-		self.noisy_net = hyperparameters['noisy_net']
+		self.noisy_net = cfg.neural_net.noisy_net
 
 		self.env = env
+
+		self.total_reward = 0
+		self.n_iter = 0
+		self.n_games = 0
+		self.ts_frame = 0
+		self.ts = time.time()
+		self.rewards = []
 
 	def act(self, obs):
 		'''
@@ -119,13 +114,20 @@ class DQNAgent():
 		self.accumulated_loss = []
 		self.n_games += 1
 
+	def save_model(self, model_path):
+		checkpoint = {
+			"episode": self.n_games,
+			'optimizer': self.cc.optimizer.state_dict(),
+			'network': self.cc.moving_nn.state_dict()
+		}
+		torch.save(checkpoint, model_path)
 
 	def print_info(self):
 		'''
 		Print information about the agent
 		'''
 		fps = (self.n_iter-self.ts_frame)/(time.time()-self.ts)
-		print('%d %d rew:%d mean_rew:%.2f eps:%.2f, fps:%d, loss:%.4f' % (self.n_iter, self.n_games, self.total_reward, np.mean(self.rewards[-40:]), self.epsilon, fps, np.mean(self.accumulated_loss)))
+		logger.info('%d %d rew:%d mean_rew:%.2f eps:%.2f, fps:%d, loss:%.4f' % (self.n_iter, self.n_games, self.total_reward, np.mean(self.rewards[-40:]), self.epsilon, fps, np.mean(self.accumulated_loss)))
 
 		self.ts_frame = self.n_iter
 		self.ts = time.time()
@@ -134,5 +136,5 @@ class DQNAgent():
 			self.summary_writer.add_scalar('reward', self.total_reward, self.n_games)
 			self.summary_writer.add_scalar('mean_reward', np.mean(self.rewards[-40:]), self.n_games)
 			self.summary_writer.add_scalar('10_mean_reward', np.mean(self.rewards[-10:]), self.n_games)
-			self.summary_writer.add_scalar('esilon', self.epsilon, self.n_games)
+			self.summary_writer.add_scalar('epsilon', self.epsilon, self.n_games)
 			self.summary_writer.add_scalar('loss', np.mean(self.accumulated_loss), self.n_games)
